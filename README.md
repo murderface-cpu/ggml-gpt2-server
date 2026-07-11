@@ -1,50 +1,132 @@
-# ggml
+# ggml-gpt2-server
 
-[Manifesto](https://github.com/ggerganov/llama.cpp/discussions/205)
+A small, self-hostable, OpenAI-API-compatible chat server — a [ggml](https://github.com/ggml-org/ggml)
+GPT-2 architecture model behind an HTTP API you can point any OpenAI client
+at (`base_url` + `api_key`), with streaming, concurrent request handling,
+and one-command HTTPS deployment via Docker + Caddy.
 
-Tensor library for machine learning
+Runs on CPU. No GPU required. The default model is small enough to run
+comfortably on a $5-10/mo VPS.
 
-***Note that this project is under active development. \
-Some of the development is currently happening in the [llama.cpp](https://github.com/ggerganov/llama.cpp) and [whisper.cpp](https://github.com/ggerganov/whisper.cpp) repos***
+## What's in here
 
-## Features
+- `examples/gpt-2/server.cpp` — the server: `/v1/completions`,
+  `/v1/chat/completions` (both with SSE streaming support), `/v1/models`,
+  `/health`. Model weights are loaded once and shared read-only; each
+  in-flight request gets its own KV-cache "slot" from a small pool, so
+  multiple requests are handled concurrently instead of queuing behind
+  one another.
+- `examples/gpt-2/convert-h5-to-ggml.py` — converts a Hugging Face
+  `GPT2LMHeadModel` checkpoint to the ggml binary format this server loads.
+- `Dockerfile` / `docker-compose.yml` / `Caddyfile` — bakes in the default
+  model, runs behind Caddy for automatic Let's Encrypt HTTPS.
+- `deploy.md` — step-by-step VPS deployment guide.
+- `examples/gpt-2/tests/test_server.py` — black-box test suite against a
+  running server (health, both endpoints, streaming, auth, concurrency,
+  error handling), stdlib-only.
+- `src/`, `include/`, `cmake/` — the underlying [ggml](https://github.com/ggml-org/ggml)
+  tensor library this is built on (MIT licensed; see `LICENSE` and `AUTHORS`).
 
-- Low-level cross-platform implementation
-- Integer quantization support
-- Broad hardware support
-- Automatic differentiation
-- ADAM and L-BFGS optimizers
-- No third-party dependencies
-- Zero memory allocations during runtime
+## Default model
 
-## Build
+Ships with [`MBZUAI/LaMini-GPT-124M`](https://huggingface.co/MBZUAI/LaMini-GPT-124M) —
+GPT-2 124M fine-tuned on 2.58M distilled instructions, so it actually
+follows instructions instead of free-associating like base GPT-2.
+
+**License note:** LaMini-GPT-124M is CC-BY-NC-4.0 — **non-commercial use
+only**. Swap in a different checkpoint (see `CHAT_TEMPLATE`/`MODEL_PATH`
+below) if you need something commercially usable.
+
+## Quickstart (Docker, recommended)
 
 ```bash
-git clone https://github.com/ggml-org/ggml
-cd ggml
+git clone <this-repo-url>
+cd ggml-gpt2-server
 
-# install python dependencies in a virtual environment
-python3.10 -m venv .venv
-source .venv/bin/activate
+# get the model — see "Getting the model" below
+docker compose up -d --build
+```
+
+See [`deploy.md`](deploy.md) for the full VPS walkthrough (DNS, firewall,
+`.env` config, sizing, troubleshooting).
+
+## Quickstart (build locally)
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release --target gpt-2-server
+
+./build/bin/gpt-2-server -m models/lamini-gpt-124m/ggml-model.bin --port 8080
+```
+
+## Getting the model
+
+The converted model isn't committed to git (see `.gitignore`). Convert it
+yourself:
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate  # or .venv\Scripts\activate on Windows
 pip install -r requirements.txt
 
-# build the examples
-mkdir build && cd build
-cmake ..
-cmake --build . --config Release -j 8
+python -c "
+from huggingface_hub import snapshot_download
+snapshot_download(repo_id='MBZUAI/LaMini-GPT-124M',
+                   local_dir='models/lamini-gpt-124m',
+                   allow_patterns=['*.json', '*.txt', '*.bin'])
+"
+python examples/gpt-2/convert-h5-to-ggml.py models/lamini-gpt-124m
 ```
 
-## GPT inference (example)
+Or run `examples/gpt-2/download-ggml-model.sh 117M` for the original,
+non-instruction-tuned base GPT-2 (pairs with `CHAT_TEMPLATE=raw`, see below).
+
+## API usage
 
 ```bash
-# run the GPT-2 small 117M model
-../examples/gpt-2/download-ggml-model.sh 117M
-./bin/gpt-2-backend -m models/gpt-2-117M/ggml-model.bin -p "This is an example"
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"What is the capital of France?"}],"max_tokens":30}'
+
+# streaming
+curl -N http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"Tell me a short story"}],"max_tokens":100,"stream":true}'
 ```
 
-For more information, checkout the corresponding programs in the [examples](examples) folder.
+Works with any OpenAI-compatible client:
 
-## Resources
+```python
+from openai import OpenAI
+client = OpenAI(base_url="http://localhost:8080/v1", api_key="unused-or-your-API_KEY")
+resp = client.chat.completions.create(
+    model="gpt-2",
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+```
 
-- [Introduction to ggml](https://huggingface.co/blog/introduction-to-ggml)
-- [The GGUF file format](https://github.com/ggerganov/ggml/blob/master/docs/gguf.md)
+## Configuration
+
+Environment variables (see `Dockerfile` for defaults):
+
+| Variable           | Meaning                                                             |
+|--------------------|----------------------------------------------------------------------|
+| `MODEL_PATH`       | path to the `.bin` ggml model file                                   |
+| `HOST` / `PORT`    | bind address (default `0.0.0.0:8080`)                                 |
+| `CTX_SIZE`         | context window (default `1024`, matches the default model)           |
+| `SLOTS`            | concurrent requests in flight (default: auto-sized from CPU count)   |
+| `THREADS`          | CPU threads per in-flight request (default: auto-sized)              |
+| `API_KEY`          | if set, requires `Authorization: Bearer <key>` (except `/health`)    |
+| `CHAT_TEMPLATE`    | `alpaca` (default, for instruction-tuned models) or `raw` (plain transcript, for base GPT-2) |
+| `QUEUE_TIMEOUT_MS` | how long a request waits for a free slot before `503`                |
+
+## Testing
+
+```bash
+python examples/gpt-2/tests/test_server.py --base-url http://localhost:8080
+```
+
+## License
+
+The ggml library itself is MIT licensed — see `LICENSE` and `AUTHORS`.
+The default bundled model (LaMini-GPT-124M) has its own, separate
+non-commercial license — see [Default model](#default-model) above.
