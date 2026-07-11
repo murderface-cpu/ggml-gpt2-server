@@ -1,0 +1,38 @@
+services:
+  gpt2-api:
+    build: .
+    image: ggml-gpt2-server
+    restart: unless-stopped
+    expose:
+      - "8080" # reachable from other containers on the compose network (caddy)
+    ports:
+      - "127.0.0.1:8090:8080" # direct localhost access for local dev/testing, bypassing Caddy/TLS
+    environment:
+      SLOTS: "${SLOTS:-2}"           # concurrent requests in flight at once
+      THREADS: "${THREADS:-2}"       # CPU threads used per in-flight request
+      CTX_SIZE: "1024"
+      QUEUE_TIMEOUT_MS: "30000"      # how long a request waits for a free slot before 503
+      # set this to require `Authorization: Bearer <key>` on requests
+      API_KEY: "${API_KEY:-}"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # a real domain pointed at this VPS's IP is required for Caddy to
+      # obtain a Let's Encrypt certificate; falls back to a local dev
+      # cert (not trusted by browsers) if left unset
+      DOMAIN: "${DOMAIN:-localhost}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - gpt2-api
+
+volumes:
+  caddy_data:
+  caddy_config:
