@@ -7,7 +7,7 @@ ci
 .pi
 *.md
 
-# HF-format checkpoint sources — only the converted ggml-model.bin files
+# HF-format checkpoint sources. Only the converted ggml-model.bin files
 # under models/ are needed by the Docker build
 models/**/pytorch_model.bin
 models/**/.cache

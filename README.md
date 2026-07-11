@@ -1,6 +1,6 @@
 # ggml-gpt2-server
 
-A small, self-hostable, OpenAI-API-compatible chat server — a [ggml](https://github.com/ggml-org/ggml)
+A small, self-hostable, OpenAI-API-compatible chat server. It's a [ggml](https://github.com/ggml-org/ggml)
 GPT-2 architecture model behind an HTTP API you can point any OpenAI client
 at (`base_url` + `api_key`), with streaming, concurrent request handling,
 and one-command HTTPS deployment via Docker + Caddy.
@@ -10,31 +10,31 @@ comfortably on a $5-10/mo VPS.
 
 ## What's in here
 
-- `examples/gpt-2/server.cpp` — the server: `/v1/completions`,
+- `examples/gpt-2/server.cpp`: the server. Endpoints are `/v1/completions`,
   `/v1/chat/completions` (both with SSE streaming support), `/v1/models`,
-  `/health`. Model weights are loaded once and shared read-only; each
+  and `/health`. Model weights are loaded once and shared read-only; each
   in-flight request gets its own KV-cache "slot" from a small pool, so
   multiple requests are handled concurrently instead of queuing behind
   one another.
-- `examples/gpt-2/convert-h5-to-ggml.py` — converts a Hugging Face
+- `examples/gpt-2/convert-h5-to-ggml.py`: converts a Hugging Face
   `GPT2LMHeadModel` checkpoint to the ggml binary format this server loads.
-- `Dockerfile` / `docker-compose.yml` / `Caddyfile` — bakes in the default
-  model, runs behind Caddy for automatic Let's Encrypt HTTPS.
-- `deploy.md` — step-by-step VPS deployment guide.
-- `examples/gpt-2/tests/test_server.py` — black-box test suite against a
+- `Dockerfile`, `docker-compose.yml`, `Caddyfile`: bakes in the default
+  model and runs behind Caddy for automatic Let's Encrypt HTTPS.
+- `deploy.md`: step-by-step VPS deployment guide.
+- `examples/gpt-2/tests/test_server.py`: black-box test suite against a
   running server (health, both endpoints, streaming, auth, concurrency,
   error handling), stdlib-only.
-- `src/`, `include/`, `cmake/` — the underlying [ggml](https://github.com/ggml-org/ggml)
+- `src/`, `include/`, `cmake/`: the underlying [ggml](https://github.com/ggml-org/ggml)
   tensor library this is built on (MIT licensed; see `LICENSE` and `AUTHORS`).
 
 ## Default model
 
-Ships with [`MBZUAI/LaMini-GPT-124M`](https://huggingface.co/MBZUAI/LaMini-GPT-124M) —
+Ships with [`MBZUAI/LaMini-GPT-124M`](https://huggingface.co/MBZUAI/LaMini-GPT-124M),
 GPT-2 124M fine-tuned on 2.58M distilled instructions, so it actually
 follows instructions instead of free-associating like base GPT-2.
 
-**License note:** LaMini-GPT-124M is CC-BY-NC-4.0 — **non-commercial use
-only**. Swap in a different checkpoint (see `CHAT_TEMPLATE`/`MODEL_PATH`
+**License note:** LaMini-GPT-124M is CC-BY-NC-4.0, non-commercial use
+only. Swap in a different checkpoint (see `CHAT_TEMPLATE`/`MODEL_PATH`
 below) if you need something commercially usable.
 
 ## Quickstart (Docker, recommended)
@@ -43,7 +43,7 @@ below) if you need something commercially usable.
 git clone <this-repo-url>
 cd ggml-gpt2-server
 
-# get the model — see "Getting the model" below
+# get the model first, see "Getting the model" below
 docker compose up -d --build
 ```
 
@@ -127,6 +127,6 @@ python examples/gpt-2/tests/test_server.py --base-url http://localhost:8080
 
 ## License
 
-The ggml library itself is MIT licensed — see `LICENSE` and `AUTHORS`.
+The ggml library itself is MIT licensed, see `LICENSE` and `AUTHORS`.
 The default bundled model (LaMini-GPT-124M) has its own, separate
-non-commercial license — see [Default model](#default-model) above.
+non-commercial license, see [Default model](#default-model) above.

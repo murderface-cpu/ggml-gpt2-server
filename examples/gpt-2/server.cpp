@@ -11,11 +11,11 @@
 // fixed-size pool, so multiple requests keep separate generation state and
 // can be streamed to their clients concurrently. Actual tensor compute is
 // still serialized behind a single mutex (ggml's CPU backend / this example's
-// graph-building code is not safe to call from multiple threads at once) —
+// graph-building code is not safe to call from multiple threads at once),
 // but the lock is held per generation *step*, not per request, so requests
 // interleave fairly instead of queuing behind one another end-to-end.
 //
-// The model/graph/eval code below is adapted from main-backend.cpp — each
+// The model/graph/eval code below is adapted from main-backend.cpp. Each
 // example in this directory is a self-contained file by convention.
 
 #include "ggml.h"
@@ -591,7 +591,7 @@ static struct ggml_cgraph * gpt2_graph(
     return gf;
 }
 
-// serializes all tensor compute — ggml's CPU backend / this graph-building
+// serializes all tensor compute. ggml's CPU backend / this graph-building
 // code is not safe to call from multiple threads concurrently, so every
 // generation step (across every slot) takes turns through this lock. This
 // still gives fair interleaving across concurrent requests since the lock is
@@ -704,7 +704,7 @@ static std::string gen_id(const char * prefix) {
 //
 // Note: stop-sequence trimming happens on the accumulated result, so in
 // streaming mode the trailing stop text may already have been flushed to the
-// client before a match is detected — an accepted approximation for a
+// client before a match is detected. That's an accepted approximation for a
 // simple example server.
 static std::string generate(
         server_state & st,
@@ -843,7 +843,7 @@ int main(int argc, char ** argv) {
     int         n_ctx      = 1024;
     std::string api_key    = "";
     int         queue_timeout_ms = 30000;
-    std::string chat_template = "alpaca"; // "alpaca" or "raw" — see /v1/chat/completions handler
+    std::string chat_template = "alpaca"; // "alpaca" or "raw", see /v1/chat/completions handler
 
     const int hw = std::max(1u, std::thread::hardware_concurrency());
     int n_slots   = std::max(1, std::min(4, hw / 2));

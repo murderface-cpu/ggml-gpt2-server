@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Black-box tests for gpt-2-server (examples/gpt-2/server.cpp) against a
-running instance. Talks plain HTTP with the standard library only — no
+running instance. Talks plain HTTP with the standard library only, no
 extra pip installs needed.
 
 Usage:
@@ -31,7 +31,7 @@ def report(name, ok, detail=""):
     status = "PASS" if ok else "FAIL"
     line = f"[{status}] {name}"
     if detail and not ok:
-        line += f" — {detail}"
+        line += f": {detail}"
     print(line)
 
 

@@ -1,6 +1,6 @@
 # Builds the ggml GPT-2 OpenAI-compatible API server.
 # Bakes in MBZUAI/LaMini-GPT-124M (instruction-tuned GPT-2, ~124M params) at
-# build time from ./models — see examples/gpt-2/convert-h5-to-ggml.py.
+# build time from ./models. See examples/gpt-2/convert-h5-to-ggml.py.
 #
 # NOTE: LaMini-GPT-124M is CC-BY-NC-4.0 licensed (non-commercial use only).
 # For commercial use, swap in a permissively-licensed checkpoint instead.
@@ -23,7 +23,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY . .
 
-# GGML_NATIVE=OFF: don't tune for the build host's CPU — the image may be
+# GGML_NATIVE=OFF: don't tune for the build host's CPU, since the image may be
 # built on a different machine than the one it eventually runs on.
 RUN cmake -B build -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF \
     && cmake --build build --config Release --target gpt-2-server -j "$(nproc)"

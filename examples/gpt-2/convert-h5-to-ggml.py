@@ -127,7 +127,7 @@ for name in list_vars.keys():
             data = data.astype(np.float32)
             ftype = 0
 
-    # HF's GPT2 Conv1D layers store weight as (in_features, out_features) —
+    # HF's GPT2 Conv1D layers store weight as (in_features, out_features),
     # transposed relative to what the ggml loader expects (nx, nf) written
     # via the reversed-shape convention below. Transpose all four per-layer
     # Conv1D weight matrices to match.
