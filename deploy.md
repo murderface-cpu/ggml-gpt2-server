@@ -1,15 +1,16 @@
-# Deploying gpt-2-server to a VPS
+# Deploying llm-server to a VPS
 
-This deploys the OpenAI-API-compatible `gpt-2-server` behind Caddy (automatic
-HTTPS) using Docker Compose. Two containers: `gpt2-api` (the model server,
-not exposed directly) and `caddy` (public entrypoint on 80/443, terminates
-TLS, reverse-proxies to `gpt2-api`).
+This deploys llama.cpp's own OpenAI-API-compatible server behind Caddy
+(automatic HTTPS) using Docker Compose. Two containers: `llm-server` (the
+model server, not exposed directly) and `caddy` (public entrypoint on
+80/443, terminates TLS, reverse-proxies to `llm-server`).
 
 ## Prerequisites
 
 - A VPS running Linux (these steps assume Ubuntu; adjust package manager
-  commands if different). 2 vCPUs / 2GB RAM is enough for the default
-  model and slot count. See [Sizing](#sizing) below for other models.
+  commands if different). The default model (`qwen2.5-1.5b`) needs at
+  least 2 vCPUs / 2GB RAM at the default context size and slot count.
+  See [Sizing](#sizing) below.
 - A domain name with an **A record pointing at the VPS's public IP**.
   Caddy needs this to obtain a Let's Encrypt certificate. It cannot get
   one for a bare IP address.
@@ -33,33 +34,27 @@ docker compose version
 ## 2. Get the code onto the VPS
 
 ```bash
-git clone <your-repo-url> ggml
-cd ggml
+git clone <your-repo-url> llm-server
+cd llm-server
 ```
 
 ## 3. Get a model
 
-The model isn't part of the Docker image; it's mounted from `./models` at
+The model isn't part of a Docker image; it's mounted from `./models` at
 container start, so this is a one-time step you can redo any time to
 switch models later (see [Switching models](README.md#switching-models)
 in the README).
 
-The easiest path: convert it on your local machine (where you likely
-already have the Python venv set up from earlier), then copy the result
-over:
-
 ```bash
-# on your LOCAL machine
-python scripts/get_model.py lamini-124m   # or lamini-774m, etc, see README.md#models
+# on your LOCAL machine (or directly on the VPS, doesn't matter here —
+# unlike the old HF-checkpoint-conversion pipeline, this is just a single
+# file download, no PyTorch/heavy ML deps needed)
+pip install huggingface_hub
+python scripts/get_model.py qwen2.5-1.5b   # or qwen2.5-0.5b for a smaller VPS
 
-scp -r "models/lamini-124m" youruser@your-vps-ip:~/ggml/models/lamini-124m
+# if you downloaded it locally, copy it over:
+scp -r "models/qwen2.5-1.5b" youruser@your-vps-ip:~/llm-server/models/qwen2.5-1.5b
 ```
-
-Alternative: run `scripts/get_model.py` directly on the VPS. Works the
-same way, but for the `lamini-*` models it needs `pip install -r
-requirements.txt` on the VPS first, which pulls in PyTorch. That's a much
-heavier install than the runtime image itself needs, so it's usually
-better to do the conversion locally and just copy the small output file.
 
 ## 4. Configure environment
 
@@ -67,9 +62,9 @@ better to do the conversion locally and just copy the small output file.
 cat > .env <<'EOF'
 DOMAIN=yourdomain.com
 API_KEY=generate-a-long-random-string-here
-MODEL_PATH=/models/lamini-124m/ggml-model.bin
-CHAT_TEMPLATE=alpaca
-SLOTS=2
+MODEL_PATH=/models/qwen2.5-1.5b/model.gguf
+CTX_SIZE=8192
+SLOTS=1
 THREADS=2
 EOF
 ```
@@ -78,29 +73,24 @@ EOF
 - **`API_KEY`**: leave blank only if you're fine with the API being open to
   anyone who finds the URL. Recommended to set this for anything public.
   Generate one with `openssl rand -hex 32`.
-- **`MODEL_PATH`** / **`CHAT_TEMPLATE`**: must match whichever model you
-  fetched in step 3. `scripts/get_model.py` prints the exact values to use.
-- **`SLOTS`** / **`THREADS`**: see [Sizing](#sizing).
+- **`MODEL_PATH`**: must match whichever model you fetched in step 3.
+- **`CTX_SIZE`** / **`SLOTS`** / **`THREADS`**: see [Sizing](#sizing).
 
-## 5. Build and start
+## 5. Start
 
 ```bash
-docker compose up -d --build
+docker compose up -d
 ```
 
-First build takes a few minutes (compiles ggml from source). Watch it:
+No build step: this pulls the official `ghcr.io/ggml-org/llama.cpp:server`
+image. Watch startup:
 
 ```bash
 docker compose logs -f
 ```
 
-You should see something like:
-
-```
-gpt2-api-1  | main: model loaded, n_ctx = 1024, slots = 2, threads/slot = 2
-gpt2-api-1  | main: listening on http://0.0.0.0:8080
-caddy-1     | ...certificate obtained successfully...
-```
+You should see the model load and the server start listening, followed by
+Caddy obtaining a certificate.
 
 ## 6. Verify
 
@@ -117,50 +107,50 @@ curl https://yourdomain.com/v1/chat/completions \
 Or run the test suite from your local machine against the live deployment:
 
 ```bash
-python examples/gpt-2/tests/test_server.py \
+python tests/test_server.py \
   --base-url https://yourdomain.com --api-key <your API_KEY>
 ```
 
 ## Updating
 
-**Code changes:**
+**Compose/Caddy config changes:**
 
 ```bash
 git pull
-docker compose up -d --build
+docker compose up -d
 ```
 
-**Switching models** doesn't need a rebuild at all, since the model is
+**New llama.cpp version**: `docker compose pull && docker compose up -d`
+picks up the latest `server` image tag.
+
+**Switching models** doesn't need a rebuild or pull, since the model is
 mounted, not baked in:
 
 ```bash
-python scripts/get_model.py lamini-774m   # on local machine, then scp as in step 3
-# update MODEL_PATH / CHAT_TEMPLATE in .env to match
+python scripts/get_model.py qwen2.5-0.5b   # then scp as in step 3 if run locally
+# update MODEL_PATH in .env to match
 docker compose up -d
 ```
 
 ## Sizing
 
-Each request in flight needs its own KV-cache slot. Numbers below are for
-the default `CTX_SIZE=1024`. `THREADS` is the CPU threads used per
-in-flight request; `SLOTS * THREADS` shouldn't greatly exceed the VPS's
-vCPU count, or concurrent requests will just contend for the same cores.
+Total memory is roughly `weights + SLOTS * per-slot` (KV cache scales with
+`CTX_SIZE`; numbers below are for llama.cpp's default f16 KV cache).
+`THREADS` is the CPU threads used per in-flight request; `SLOTS * THREADS`
+shouldn't greatly exceed the VPS's vCPU count, or concurrent requests will
+just contend for the same cores.
 
-| Model         | Weights (fixed) | Per slot |
-|---------------|------------------|----------|
-| `lamini-124m` | ~315MB           | ~72MB    |
-| `lamini-774m` | ~1.6GB           | ~360MB   |
+| Model          | Weights (fixed) | Per slot @ CTX_SIZE=8192 | Per slot @ 32768 |
+|----------------|------------------|----------------------------|---------------------|
+| `qwen2.5-0.5b` | ~500MB           | ~96MB                     | ~384MB               |
+| `qwen2.5-1.5b` | ~1.1GB           | ~224MB                    | ~896MB               |
 
-So total memory is roughly `weights + SLOTS * per-slot` (plus a few MB per
-slot of compute-buffer overhead, small enough to ignore here).
-
-| VPS size      | Model         | SLOTS | THREADS |
-|---------------|---------------|-------|---------|
-| 1 vCPU / 1GB  | `lamini-124m` | 1     | 1       |
-| 2 vCPU / 2GB  | `lamini-124m` | 2     | 2       |
-| 4 vCPU / 4GB  | `lamini-124m` | 4     | 2       |
-| 2 vCPU / 4GB  | `lamini-774m` | 1     | 2       |
-| 4 vCPU / 8GB  | `lamini-774m` | 2     | 2       |
+| VPS size      | Model          | CTX_SIZE | SLOTS | THREADS |
+|---------------|----------------|----------|-------|---------|
+| 1 vCPU / 1GB  | `qwen2.5-0.5b` | 4096     | 1     | 1       |
+| 2 vCPU / 2GB  | `qwen2.5-1.5b` | 8192     | 1     | 2       |
+| 4 vCPU / 4GB  | `qwen2.5-1.5b` | 8192     | 2     | 2       |
+| 4 vCPU / 8GB  | `qwen2.5-1.5b` | 32768    | 2     | 2       |
 
 ## Troubleshooting
 
@@ -170,19 +160,16 @@ slot of compute-buffer overhead, small enough to ignore here).
 - **`docker compose up` fails to bind port 80/443**: something else on the
   VPS is already using it (e.g. a pre-installed Apache/Nginx). Stop it or
   reassign ports.
-- **Backend not responding but Caddy is up**: check `docker compose logs gpt2-api`.
-  Common cause is `MODEL_PATH` in `.env` pointing at a file that doesn't
-  exist under `./models` on the VPS; the server logs a "failed to load
-  model" error and exits.
+- **Backend not responding but Caddy is up**: check `docker compose logs
+  llm-server`. Common cause is `MODEL_PATH` in `.env` pointing at a file
+  that doesn't exist under `./models` on the VPS.
 - **Direct backend access for debugging** (bypasses Caddy/TLS): the compose
-  file binds `gpt2-api` to `127.0.0.1:8090` on the VPS itself, so
+  file binds `llm-server` to `127.0.0.1:8090` on the VPS itself, so
   `ssh youruser@your-vps-ip` then `curl http://localhost:8090/health` works
   without going through DNS/TLS at all. This is not reachable from outside
   the VPS (bound to loopback only).
 
 ## License note
 
-The `lamini-*` models are **CC-BY-NC-4.0 licensed, non-commercial use
-only**. The `gpt2-*-base` models are the original MIT-licensed OpenAI
-weights and don't have that restriction, but aren't instruction-tuned. See
-[Models in the README](README.md#models) for the full list and trade-offs.
+The `qwen2.5-*` models are Apache-2.0, usable commercially. See
+[Models in the README](README.md#models) for details.

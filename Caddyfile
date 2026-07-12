@@ -1,5 +1,5 @@
 {$DOMAIN:localhost} {
-	reverse_proxy gpt2-api:8080 {
+	reverse_proxy llm-server:8080 {
 		# flush immediately so SSE streaming isn't buffered by the proxy
 		flush_interval -1
 	}

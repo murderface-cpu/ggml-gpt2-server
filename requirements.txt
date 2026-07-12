@@ -1,7 +1,0 @@
-numpy~=1.26.4; python_version < "3.13"
-numpy~=2.1.0; python_version >= "3.13"
-transformers==5.5.1
-huggingface_hub>=0.24.0
-
---extra-index-url https://download.pytorch.org/whl/cpu
-torch~=2.6.0

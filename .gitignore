@@ -1,40 +1,11 @@
-build/
-build-*/
-out/
-tmp/
+# downloaded GGUF model files
 models/
-models-mnt
 
-compile_commands.json
-CMakeSettings.json
-.vs/
-.vscode/
-.idea/
-.clangd
+# secrets, never commit
+.env
+.env*.local
 
 .venv/
-ggml_env/
 .claude/
-.exrc
-.cache
-.DS_Store
-.stablelm
-.gpt-2
-
-src/arm_neon.h
-tests/arm_neon.h
-
-zig-out/
-zig-cache/
-
-*.o
-*.d
-*.dot
-
-*.sw?
-
 __pycache__/
-
-# Model files
-ggml-model-f16.bin
-*.bat
+.DS_Store

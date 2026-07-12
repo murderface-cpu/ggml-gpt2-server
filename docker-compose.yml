@@ -1,27 +1,29 @@
 services:
-  gpt2-api:
-    build: .
-    image: ggml-gpt2-server
+  llm-server:
+    image: ghcr.io/ggml-org/llama.cpp:server
     restart: unless-stopped
     expose:
       - "8080" # reachable from other containers on the compose network (caddy)
     ports:
       - "127.0.0.1:8090:8080" # direct localhost access for local dev/testing, bypassing Caddy/TLS
     volumes:
-      # the model isn't baked into the image; run `python scripts/get_model.py <name>`
-      # to populate ./models, then point MODEL_PATH at the one you want
+      # run `python scripts/get_model.py <name>` to populate ./models, then
+      # point MODEL_PATH at the one you want; see scripts/get_model.py --list
       - ./models:/models:ro
     environment:
-      # see `python scripts/get_model.py --list` for available models and
-      # the MODEL_PATH/CHAT_TEMPLATE pair each one needs
-      MODEL_PATH: "${MODEL_PATH:-/models/lamini-124m/ggml-model.bin}"
-      CHAT_TEMPLATE: "${CHAT_TEMPLATE:-alpaca}"
-      SLOTS: "${SLOTS:-2}"           # concurrent requests in flight at once
-      THREADS: "${THREADS:-2}"       # CPU threads used per in-flight request
-      CTX_SIZE: "1024"
-      QUEUE_TIMEOUT_MS: "30000"      # how long a request waits for a free slot before 503
-      # set this to require `Authorization: Bearer <key>` on requests
-      API_KEY: "${API_KEY:-}"
+      MODEL_PATH: "${MODEL_PATH:-/models/qwen2.5-1.5b/model.gguf}"
+      CTX_SIZE: "${CTX_SIZE:-8192}"   # context window; the model supports up to 32768
+      SLOTS: "${SLOTS:-1}"            # concurrent requests in flight at once (-np)
+      THREADS: "${THREADS:-2}"        # CPU threads used per in-flight request
+      API_KEY: "${API_KEY:-}"         # if set, requires `Authorization: Bearer <key>`
+    command: >
+      -m ${MODEL_PATH:-/models/qwen2.5-1.5b/model.gguf}
+      --host 0.0.0.0
+      --port 8080
+      -c ${CTX_SIZE:-8192}
+      -np ${SLOTS:-1}
+      -t ${THREADS:-2}
+      --api-key ${API_KEY:-}
 
   caddy:
     image: caddy:2-alpine
@@ -39,7 +41,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      - gpt2-api
+      - llm-server
 
 volumes:
   caddy_data:
