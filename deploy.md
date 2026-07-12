@@ -9,7 +9,7 @@ TLS, reverse-proxies to `gpt2-api`).
 
 - A VPS running Linux (these steps assume Ubuntu; adjust package manager
   commands if different). 2 vCPUs / 2GB RAM is enough for the default
-  2-slot configuration. See [Sizing](#sizing) below to scale that up.
+  model and slot count. See [Sizing](#sizing) below for other models.
 - A domain name with an **A record pointing at the VPS's public IP**.
   Caddy needs this to obtain a Let's Encrypt certificate. It cannot get
   one for a bare IP address.
@@ -32,36 +32,43 @@ docker compose version
 
 ## 2. Get the code onto the VPS
 
-The model weights (`models/`) are gitignored since they're large binaries and
-don't belong in git. Get the repo and the model onto the VPS separately.
-
-**Repo** (commit and push your local changes first if you haven't):
-
 ```bash
 git clone <your-repo-url> ggml
 cd ggml
 ```
 
-**Model**: copy the already-converted ggml file from your local machine:
+## 3. Get a model
+
+The model isn't part of the Docker image; it's mounted from `./models` at
+container start, so this is a one-time step you can redo any time to
+switch models later (see [Switching models](README.md#switching-models)
+in the README).
+
+The easiest path: convert it on your local machine (where you likely
+already have the Python venv set up from earlier), then copy the result
+over:
 
 ```bash
-# run this from your LOCAL machine, not the VPS
-scp -r "models/lamini-gpt-124m" youruser@your-vps-ip:~/ggml/models/lamini-gpt-124m
+# on your LOCAL machine
+python scripts/get_model.py lamini-124m   # or lamini-774m, etc, see README.md#models
+
+scp -r "models/lamini-124m" youruser@your-vps-ip:~/ggml/models/lamini-124m
 ```
 
-The Dockerfile expects `models/lamini-gpt-124m/ggml-model.bin` to exist at
-build time. The build will fail with a "no such file" error if it's
-missing. (Alternative: reconvert on the VPS itself by installing
-`requirements.txt` and running `examples/gpt-2/convert-h5-to-ggml.py` there.
-That's heavier, since it needs Python/PyTorch/transformers installed, which the
-runtime image itself does not need.)
+Alternative: run `scripts/get_model.py` directly on the VPS. Works the
+same way, but for the `lamini-*` models it needs `pip install -r
+requirements.txt` on the VPS first, which pulls in PyTorch. That's a much
+heavier install than the runtime image itself needs, so it's usually
+better to do the conversion locally and just copy the small output file.
 
-## 3. Configure environment
+## 4. Configure environment
 
 ```bash
 cat > .env <<'EOF'
 DOMAIN=yourdomain.com
 API_KEY=generate-a-long-random-string-here
+MODEL_PATH=/models/lamini-124m/ggml-model.bin
+CHAT_TEMPLATE=alpaca
 SLOTS=2
 THREADS=2
 EOF
@@ -71,9 +78,11 @@ EOF
 - **`API_KEY`**: leave blank only if you're fine with the API being open to
   anyone who finds the URL. Recommended to set this for anything public.
   Generate one with `openssl rand -hex 32`.
+- **`MODEL_PATH`** / **`CHAT_TEMPLATE`**: must match whichever model you
+  fetched in step 3. `scripts/get_model.py` prints the exact values to use.
 - **`SLOTS`** / **`THREADS`**: see [Sizing](#sizing).
 
-## 4. Build and start
+## 5. Build and start
 
 ```bash
 docker compose up -d --build
@@ -93,7 +102,7 @@ gpt2-api-1  | main: listening on http://0.0.0.0:8080
 caddy-1     | ...certificate obtained successfully...
 ```
 
-## 5. Verify
+## 6. Verify
 
 ```bash
 curl https://yourdomain.com/health
@@ -114,30 +123,44 @@ python examples/gpt-2/tests/test_server.py \
 
 ## Updating
 
+**Code changes:**
+
 ```bash
 git pull
 docker compose up -d --build
 ```
 
-If only the model changed (not the code), re-copy it via `scp` as in step 2,
-then `docker compose up -d --build`. Docker only rebuilds the layer that
-changed.
+**Switching models** doesn't need a rebuild at all, since the model is
+mounted, not baked in:
+
+```bash
+python scripts/get_model.py lamini-774m   # on local machine, then scp as in step 3
+# update MODEL_PATH / CHAT_TEMPLATE in .env to match
+docker compose up -d
+```
 
 ## Sizing
 
-Each request in flight needs its own KV-cache slot: ~72MB per slot at the
-default `CTX_SIZE=1024`, plus a shared ~315MB for the model weights (fixed,
-regardless of `SLOTS`). So total memory is roughly `315MB + SLOTS * 78MB`
-(the extra ~6MB per slot is compute-buffer overhead). `THREADS` is the CPU
-threads used per in-flight request. `SLOTS * THREADS` shouldn't greatly
-exceed the VPS's vCPU count, or concurrent requests will just contend for
-the same cores.
+Each request in flight needs its own KV-cache slot. Numbers below are for
+the default `CTX_SIZE=1024`. `THREADS` is the CPU threads used per
+in-flight request; `SLOTS * THREADS` shouldn't greatly exceed the VPS's
+vCPU count, or concurrent requests will just contend for the same cores.
 
-| VPS size      | SLOTS | THREADS |
-|---------------|-------|---------|
-| 1 vCPU / 1GB  | 1     | 1       |
-| 2 vCPU / 2GB  | 2     | 2       |
-| 4 vCPU / 4GB  | 4     | 2       |
+| Model         | Weights (fixed) | Per slot |
+|---------------|------------------|----------|
+| `lamini-124m` | ~315MB           | ~72MB    |
+| `lamini-774m` | ~1.6GB           | ~360MB   |
+
+So total memory is roughly `weights + SLOTS * per-slot` (plus a few MB per
+slot of compute-buffer overhead, small enough to ignore here).
+
+| VPS size      | Model         | SLOTS | THREADS |
+|---------------|---------------|-------|---------|
+| 1 vCPU / 1GB  | `lamini-124m` | 1     | 1       |
+| 2 vCPU / 2GB  | `lamini-124m` | 2     | 2       |
+| 4 vCPU / 4GB  | `lamini-124m` | 4     | 2       |
+| 2 vCPU / 4GB  | `lamini-774m` | 1     | 2       |
+| 4 vCPU / 8GB  | `lamini-774m` | 2     | 2       |
 
 ## Troubleshooting
 
@@ -148,8 +171,9 @@ the same cores.
   VPS is already using it (e.g. a pre-installed Apache/Nginx). Stop it or
   reassign ports.
 - **Backend not responding but Caddy is up**: check `docker compose logs gpt2-api`.
-  Check the model file actually exists at `models/lamini-gpt-124m/ggml-model.bin`
-  before the build ran.
+  Common cause is `MODEL_PATH` in `.env` pointing at a file that doesn't
+  exist under `./models` on the VPS; the server logs a "failed to load
+  model" error and exits.
 - **Direct backend access for debugging** (bypasses Caddy/TLS): the compose
   file binds `gpt2-api` to `127.0.0.1:8090` on the VPS itself, so
   `ssh youruser@your-vps-ip` then `curl http://localhost:8090/health` works
@@ -158,7 +182,7 @@ the same cores.
 
 ## License note
 
-The default baked-in model, `MBZUAI/LaMini-GPT-124M`, is **CC-BY-NC-4.0
-licensed, non-commercial use only**. If this deployment has any commercial
-angle, swap in a permissively-licensed checkpoint instead (see the Dockerfile
-header for how to point at a different model).
+The `lamini-*` models are **CC-BY-NC-4.0 licensed, non-commercial use
+only**. The `gpt2-*-base` models are the original MIT-licensed OpenAI
+weights and don't have that restriction, but aren't instruction-tuned. See
+[Models in the README](README.md#models) for the full list and trade-offs.

@@ -1,18 +1,19 @@
 # Builds the ggml GPT-2 OpenAI-compatible API server.
-# Bakes in MBZUAI/LaMini-GPT-124M (instruction-tuned GPT-2, ~124M params) at
-# build time from ./models. See examples/gpt-2/convert-h5-to-ggml.py.
 #
-# NOTE: LaMini-GPT-124M is CC-BY-NC-4.0 licensed (non-commercial use only).
-# For commercial use, swap in a permissively-licensed checkpoint instead.
+# The model is NOT baked into the image. Mount your local ./models directory
+# and pick which one to load via MODEL_PATH, so switching models is just a
+# config change and a restart, not a rebuild:
 #
+#   python scripts/get_model.py lamini-124m     # or lamini-774m, etc
 #   docker build -t ggml-gpt2-server .
-#   docker run -p 8080:8080 ggml-gpt2-server
+#   docker run -p 8080:8080 -v "$(pwd)/models:/models:ro" \
+#       -e MODEL_PATH=/models/lamini-124m/ggml-model.bin \
+#       -e CHAT_TEMPLATE=alpaca \
+#       ggml-gpt2-server
 #
-# To swap in a different model without rebuilding, bind-mount it and point
-# MODEL_PATH at it (set CHAT_TEMPLATE=raw for a non-instruction-tuned base
-# GPT-2 checkpoint):
-#   docker run -p 8080:8080 -v /path/to/model.bin:/models/other.bin \
-#       -e MODEL_PATH=/models/other.bin -e CHAT_TEMPLATE=raw ggml-gpt2-server
+# See scripts/get_model.py --list for available models, and README.md for
+# more on switching models (docker-compose.yml already wires this up via
+# MODEL_PATH/CHAT_TEMPLATE in .env).
 
 FROM debian:bookworm AS builder
 
@@ -37,11 +38,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /src/build/bin/gpt-2-server /usr/local/bin/gpt-2-server
 COPY --from=builder /src/build/src/*.so* /usr/local/lib/
-COPY --from=builder --chown=ggml:ggml /src/models/lamini-gpt-124m/ggml-model.bin /models/ggml-model.bin
 
 RUN ldconfig
 
-ENV MODEL_PATH=/models/ggml-model.bin \
+ENV MODEL_PATH=/models/lamini-124m/ggml-model.bin \
+    CHAT_TEMPLATE=alpaca \
     HOST=0.0.0.0 \
     PORT=8080 \
     CTX_SIZE=1024 \

@@ -7,7 +7,15 @@ services:
       - "8080" # reachable from other containers on the compose network (caddy)
     ports:
       - "127.0.0.1:8090:8080" # direct localhost access for local dev/testing, bypassing Caddy/TLS
+    volumes:
+      # the model isn't baked into the image; run `python scripts/get_model.py <name>`
+      # to populate ./models, then point MODEL_PATH at the one you want
+      - ./models:/models:ro
     environment:
+      # see `python scripts/get_model.py --list` for available models and
+      # the MODEL_PATH/CHAT_TEMPLATE pair each one needs
+      MODEL_PATH: "${MODEL_PATH:-/models/lamini-124m/ggml-model.bin}"
+      CHAT_TEMPLATE: "${CHAT_TEMPLATE:-alpaca}"
       SLOTS: "${SLOTS:-2}"           # concurrent requests in flight at once
       THREADS: "${THREADS:-2}"       # CPU threads used per in-flight request
       CTX_SIZE: "1024"

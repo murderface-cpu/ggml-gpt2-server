@@ -7,9 +7,6 @@ ci
 .pi
 *.md
 
-# HF-format checkpoint sources. Only the converted ggml-model.bin files
-# under models/ are needed by the Docker build
-models/**/pytorch_model.bin
-models/**/.cache
-models/**/tokenizer.json
-models/**/*.safetensors
+# models are mounted at runtime (see docker-compose.yml), not baked into
+# the image, so none of it needs to be in the build context
+models
