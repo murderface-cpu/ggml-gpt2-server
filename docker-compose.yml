@@ -23,7 +23,7 @@ services:
       -c ${CTX_SIZE:-8192}
       -np ${SLOTS:-1}
       -t ${THREADS:-2}
-      --api-key ${API_KEY:-}
+      ${API_KEY:+--api-key }${API_KEY}
 
   caddy:
     image: caddy:2-alpine
